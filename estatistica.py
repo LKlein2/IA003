@@ -112,64 +112,6 @@ def inferencia_media(valores, mu0, alternativa, alfa=0.05, confianca=0.95):
     }
 
 
-def inferencia_duas_medias(grupo1, grupo2, delta0, alternativa, alfa=0.05, confianca=0.95):
-    """IC e teste t de Welch para a diferença μ1 − μ2 (grupos independentes, variâncias diferentes)."""
-    x1 = np.asarray(grupo1, dtype=float)
-    x2 = np.asarray(grupo2, dtype=float)
-    n1, n2 = len(x1), len(x2)
-    v1, v2 = x1.var(ddof=1) / n1, x2.var(ddof=1) / n2
-    diferenca = x1.mean() - x2.mean()
-
-    ep = math.sqrt(v1 + v2)
-    # Graus de liberdade de Welch-Satterthwaite
-    gl = (v1 + v2) ** 2 / (v1**2 / (n1 - 1) + v2**2 / (n2 - 1))
-    dist = stats.t(gl)
-    t_crit = dist.ppf(1 - (1 - confianca) / 2)
-    ic = (diferenca - t_crit * ep, diferenca + t_crit * ep)
-
-    t = (diferenca - delta0) / ep
-    p_valor = calcular_p_valor(dist, t, alternativa)
-    assimetria1, assimetria2 = stats.skew(x1), stats.skew(x2)
-
-    return {
-        "n": n1 + n2,
-        "n1": n1,
-        "n2": n2,
-        "media1": x1.mean(),
-        "media2": x2.mean(),
-        "desvio1": x1.std(ddof=1),
-        "desvio2": x2.std(ddof=1),
-        "estimativa": diferenca,
-        "erro_padrao": ep,
-        "margem": t_crit * ep,
-        "ic": ic,
-        "gl": gl,
-        "estatistica": t,
-        "nome_estatistica": "t",
-        "p_valor": p_valor,
-        "rejeita_h0": p_valor < alfa,
-        "critico": valores_criticos(dist, alternativa, alfa),
-        "distribuicao": dist,
-        "condicoes": {
-            "n₁ ≥ 30 (TCL)": (n1, n1 >= 30),
-            "n₂ ≥ 30 (TCL)": (n2, n2 >= 30),
-            "n₁ > 15·assimetria₁²": (15 * assimetria1**2, n1 > 15 * assimetria1**2),
-            "n₂ > 15·assimetria₂²": (15 * assimetria2**2, n2 > 15 * assimetria2**2),
-        },
-    }
-
-
-def ic_bootstrap_diferenca(grupo1, grupo2, confianca=0.95, reamostras=5000, semente=2026):
-    """IC bootstrap percentil para μ1 − μ2, reamostrando cada grupo separadamente."""
-    x1 = np.asarray(grupo1, dtype=float)
-    x2 = np.asarray(grupo2, dtype=float)
-    rng = np.random.default_rng(semente)
-    medias1 = rng.choice(x1, size=(reamostras, len(x1)), replace=True).mean(axis=1)
-    medias2 = rng.choice(x2, size=(reamostras, len(x2)), replace=True).mean(axis=1)
-    alfa = 1 - confianca
-    return tuple(np.quantile(medias1 - medias2, [alfa / 2, 1 - alfa / 2]))
-
-
 def ic_bootstrap_media(valores, confianca=0.95, reamostras=5000, semente=2026):
     """IC bootstrap percentil para a média, usado como verificação do IC t."""
     valores = np.asarray(valores, dtype=float)

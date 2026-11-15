@@ -25,7 +25,7 @@ hipóteses para duas proporções e duas médias.
 | P1 | Mais de 30% dos lançamentos são de combustível? | p ≤ 0,30 · p > 0,30 | Z para proporção |
 | P2 | Os deputados do Sudeste concentram mais lançamentos que o peso da bancada (179/513 = 34,9%)? | p ≤ 0,349 · p > 0,349 | Z para proporção |
 | M1 | O valor médio de um lançamento passa de R$ 1.000? | μ ≤ 1.000 · μ > 1.000 | t para média |
-| M2 | O valor médio de uma passagem aérea é maior que o das demais despesas? | μP − μD = 0 · μP − μD > 0 | t de Welch para duas médias |
+| M2 | O valor médio de uma passagem aérea passa de R$ 1.000? | μ = 1.000 · μ > 1.000 | t para média |
 
 ## Estrutura
 
