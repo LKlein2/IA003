@@ -52,13 +52,8 @@ VARIAVEIS_QUANTITATIVAS = {
 VARIAVEIS_QUALITATIVAS = {
     "Categoria de despesa": "categoria",
     "Região do parlamentar": "regiao",
-    "Partido": "sgPartido",
-    "Mês de competência": "numMes",
 }
 
-N_PARTIDOS = 10
-OUTROS_PARTIDOS = "Outros partidos"
-MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 REGIOES = ["Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul"]
 
 
@@ -131,27 +126,13 @@ EIXO_DECIMAL = "replace(format(datum.value, '.1f'), '.', ',')"
 
 def ordem_niveis(populacao, coluna):
     """Ordem fixa dos níveis, definida pela população, para que amostra e população coincidam."""
-    if coluna == "numMes":
-        return MESES
     if coluna == "regiao":
         return REGIOES
-    contagem = populacao[coluna].value_counts()
-    if coluna == "sgPartido":
-        return list(contagem.index[:N_PARTIDOS]) + [OUTROS_PARTIDOS]
-    return list(contagem.index)
-
-
-def rotular_niveis(serie, coluna, ordem):
-    if coluna == "numMes":
-        return serie.map(lambda m: MESES[m - 1])
-    if coluna == "sgPartido":
-        return serie.where(serie.isin(ordem), OUTROS_PARTIDOS)
-    return serie
+    return list(populacao[coluna].value_counts().index)
 
 
 def tabela_frequencias(df, coluna, ordem):
-    niveis = rotular_niveis(df[coluna], coluna, ordem)
-    freq = niveis.value_counts().reindex(ordem, fill_value=0)
+    freq = df[coluna].value_counts().reindex(ordem, fill_value=0)
     return pd.DataFrame({"Nível": ordem, "Frequência": freq.to_numpy(), "Proporção": (freq / len(df)).to_numpy()})
 
 
