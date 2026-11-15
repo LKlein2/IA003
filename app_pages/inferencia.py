@@ -29,7 +29,7 @@ from comum import (
     parametro_populacional,
     simular_amostras,
 )
-from estatistica import ic_bootstrap_media
+from estatistica import ic_bootstrap_diferenca, ic_bootstrap_media
 
 amostra = carregar_amostra()
 populacao = carregar_populacao()
@@ -62,6 +62,15 @@ def eh_proporcao(hip):
     return hip["tipo"] == "proporcao"
 
 
+def eh_diferenca(hip):
+    return hip["tipo"] == "diferenca_medias"
+
+
+def grupos(hip, df):
+    """Valores dos dois grupos comparados numa hipótese de diferença de médias."""
+    return df.loc[hip["funcao"](df), "vlrLiquido"], df.loc[hip["funcao_grupo2"](df), "vlrLiquido"]
+
+
 def fmt_ic(hip, ic):
     return f"[{fmt_variavel(ic[0], eh_proporcao(hip))}; {fmt_variavel(ic[1], eh_proporcao(hip))}]"
 
@@ -77,13 +86,14 @@ def contem(ic, valor):
 
 def tipo_de_decisao(hip, res, parametro):
     """Compara a decisão do teste com a verdade conhecida na população."""
+    # h0_verdadeira é o complemento de H1 (para M2, H1 falsa = média das passagens não supera a das demais)
     verdadeira = h0_verdadeira(hip, parametro)
     if res["rejeita_h0"] and not verdadeira:
-        return "Decisão correta: rejeitou uma H₀ que é falsa na população."
+        return "Decisão correta: rejeitou H₀, e H₁ é verdadeira na população."
     if not res["rejeita_h0"] and verdadeira:
-        return "Decisão correta: não rejeitou uma H₀ que é verdadeira na população."
+        return "Decisão correta: não rejeitou H₀, e H₁ é falsa na população."
     if res["rejeita_h0"]:
-        return "Erro tipo I: rejeitou uma H₀ que é verdadeira na população."
+        return "Erro tipo I: rejeitou H₀, mas H₁ é falsa na população."
     prop = eh_proporcao(hip)
     distancia = abs(parametro - hip["valor_h0"])
     distancia = f"{fmt_num(distancia * 100, 2)} p.p." if prop else fmt_reais(distancia)
@@ -112,7 +122,7 @@ def grafico_resumo(hips):
     dados = pd.DataFrame(linhas)
     prop = eh_proporcao(hips[0])
     eixo = alt.Axis(labelExpr=EIXO_PCT if prop else EIXO_REAIS)
-    titulo_x = "Proporção" if prop else "Valor médio (R$)"
+    titulo_x = "Proporção" if prop else "R$ (média em M1, diferença de médias em M2)"
     y = alt.Y("Hipótese:N", title=None, axis=alt.Axis(labelLimit=260))
     tooltip = [
         alt.Tooltip("Hipótese:N"),
@@ -237,13 +247,14 @@ for hip in HIPOTESES:
     res = resultados[hip["id"]]
     parametro = parametros[hip["id"]]
     prop = eh_proporcao(hip)
+    simbolo = hip["simbolo_texto"]
+    sinal_h0 = "=" if hip.get("sinal_h0") == "=" else {"maior": "≤", "menor": "≥", "diferente": "="}[hip["alternativa"]]
+    sinal_h1 = {"maior": ">", "menor": "<", "diferente": "≠"}[hip["alternativa"]]
     linhas.append({
         "Hipótese": hip["id"],
         "Parâmetro": hip["titulo"],
-        "H0 · H1": f"{'p' if prop else 'μ'} {'≤' if hip['alternativa'] == 'maior' else '≥' if hip['alternativa'] == 'menor' else '='} "
-                   f"{fmt_h0(hip)} · {'p' if prop else 'μ'} "
-                   f"{'>' if hip['alternativa'] == 'maior' else '<' if hip['alternativa'] == 'menor' else '≠'} {fmt_h0(hip)}",
-        "n": res["n"],
+        "H0 · H1": f"{simbolo} {sinal_h0} {fmt_h0(hip)} · {simbolo} {sinal_h1} {fmt_h0(hip)}",
+        "n": f"{res['n1']} + {res['n2']}" if eh_diferenca(hip) else str(res["n"]),
         "Estimativa": fmt_variavel(res["estimativa"], prop),
         f"IC {confianca}": fmt_ic(hip, res["ic"]),
         "Estatística": f"{res['nome_estatistica']} = {fmt_num(res['estatistica'], 2)}",
@@ -302,6 +313,13 @@ with col_hip:
                 f"Estatística: $Z = \\dfrac{{\\hat p - p_0}}{{\\sqrt{{p_0(1-p_0)/n}}}}$. "
                 f"Nível de significância α = {fmt_pct(alfa, 0)}."
             )
+        elif eh_diferenca(hip):
+            st.markdown(
+                f"**Procedimento:** teste t de Welch para a diferença entre duas médias independentes e IC t "
+                f"de Welch. Estatística: $t = \\dfrac{{\\bar x_P - \\bar x_D}}{{\\sqrt{{s_P^2/n_P + s_D^2/n_D}}}}$, "
+                f"com {fmt_num(res['gl'], 1)} graus de liberdade (Welch-Satterthwaite). "
+                f"Nível de significância α = {fmt_pct(alfa, 0)}."
+            )
         else:
             st.markdown(
                 f"**Procedimento:** teste t de Student para uma média (σ desconhecido) e IC t. "
@@ -327,6 +345,16 @@ with col_nota:
             "Com pelo menos 10 sucessos e 10 fracassos esperados, a distribuição de p̂ é bem aproximada "
             "pela normal (Teorema Central do Limite)."
         )
+    elif eh_diferenca(hip):
+        bootstrap = ic_bootstrap_diferenca(*grupos(hip, amostra), 1 - alfa)
+        st.caption(
+            "Os grupos são independentes: vêm da mesma AAS e cada lançamento pertence a um só grupo. "
+            f"As variâncias são muito diferentes (s_P = {fmt_reais(res['desvio1'])}, s_D = {fmt_reais(res['desvio2'])}), "
+            "por isso o teste de Welch, que não supõe variâncias iguais. As demais despesas são muito "
+            "assimétricas, e a regra n > 15·assimetria² verifica se cada grupo é grande o bastante. Como "
+            f"verificação, o IC bootstrap percentil (5.000 reamostragens) dá {fmt_ic(hip, bootstrap)}, "
+            f"contra {fmt_ic(hip, res['ic'])} do IC de Welch."
+        )
     else:
         bootstrap = ic_bootstrap_media(amostra.loc[hip["funcao"](amostra), "vlrLiquido"], 1 - alfa)
         st.caption(
@@ -338,9 +366,15 @@ with col_nota:
 
 st.markdown("**Resultados com a amostra**")
 with st.container(horizontal=True):
-    st.metric("Tamanho da amostra (n)", fmt_num(res["n"]), border=True)
-    st.metric("Estimativa pontual", fmt_variavel(res["estimativa"], prop), border=True,
-              help="Proporção amostral p̂." if prop else f"Média amostral x̄ (desvio-padrão s = {fmt_reais(res['desvio_padrao'])}).")
+    if eh_diferenca(hip):
+        st.metric("Tamanho dos grupos (nP + nD)", f"{res['n1']} + {res['n2']}", border=True)
+        ajuda_estimativa = (
+            f"x̄P − x̄D = {fmt_reais(res['media1'])} (passagens) − {fmt_reais(res['media2'])} (demais despesas)."
+        )
+    else:
+        st.metric("Tamanho da amostra (n)", fmt_num(res["n"]), border=True)
+        ajuda_estimativa = "Proporção amostral p̂." if prop else f"Média amostral x̄ (desvio-padrão s = {fmt_reais(res['desvio_padrao'])})."
+    st.metric("Estimativa pontual", fmt_variavel(res["estimativa"], prop), border=True, help=ajuda_estimativa)
     st.metric(f"IC de {confianca}", fmt_ic(hip, res["ic"]), border=True,
               help=f"Estimativa ± margem de erro de {fmt_variavel(res['margem'], prop, 2)}.")
     st.metric(f"Estatística {res['nome_estatistica']}", fmt_num(res["estatistica"], 3), border=True)
@@ -356,12 +390,14 @@ with col_graf:
 with col_conc:
     decisao = "rejeitamos H0" if res["rejeita_h0"] else "não rejeitamos H0"
     sentido = {"maior": "maior que", "menor": "menor que", "diferente": "diferente de"}[hip["alternativa"]]
+    if eh_diferenca(hip):
+        afirmacao = f"a média das passagens aéreas é {sentido} a média das demais despesas"
+    else:
+        afirmacao = f"o parâmetro é {sentido} {fmt_h0(hip)}"
     evidencia = (
-        f"Há evidência estatística, ao nível de {fmt_pct(alfa, 0)}, de que o parâmetro é {sentido} "
-        f"{fmt_h0(hip)}."
+        f"Há evidência estatística, ao nível de {fmt_pct(alfa, 0)}, de que {afirmacao}."
         if res["rejeita_h0"]
-        else f"Não há evidência suficiente, ao nível de {fmt_pct(alfa, 0)}, de que o parâmetro seja {sentido} "
-        f"{fmt_h0(hip)}."
+        else f"Não há evidência suficiente, ao nível de {fmt_pct(alfa, 0)}, de que {afirmacao}."
     )
     with st.container(border=True):
         st.markdown("**Conclusão do teste**")
@@ -379,15 +415,26 @@ with col_conc:
         texto_diferenca = f"{'+' if diferenca > 0 else ''}{fmt_num(diferenca * 100, 2)} p.p."
     else:
         texto_diferenca = f"{'+' if diferenca > 0 else '−'}{fmt_reais(abs(diferenca))}"
+    # Para diferença de médias o parâmetro fica perto de zero, e o erro relativo não faz sentido
+    relativo = "" if eh_diferenca(hip) else f", ou {fmt_pct(diferenca / parametro)} do parâmetro"
     with st.container(border=True):
         st.markdown("**Comparação com a população**")
         st.markdown(
             f"- Parâmetro da população: **{fmt_variavel(parametro, prop)}**\n"
             f"- Estimativa da amostra: **{fmt_variavel(res['estimativa'], prop)}** "
-            f"(diferença de {texto_diferenca}, ou {fmt_pct(diferenca / parametro)} do parâmetro)\n"
+            f"(diferença de {texto_diferenca}{relativo})\n"
             f"- O IC {'**contém**' if contem(res['ic'], parametro) else '**não contém**'} o parâmetro populacional.\n"
             f"- {tipo_de_decisao(hip, res, parametro)}"
         )
+        if eh_diferenca(hip):
+            pop_p, pop_d = grupos(hip, populacao)
+            st.markdown(
+                f"Na população, a passagem aérea tem média de {fmt_reais(pop_p.mean())} e mediana de "
+                f"{fmt_reais(pop_p.median())}; as demais despesas têm média de {fmt_reais(pop_d.mean())}, mas "
+                f"mediana de só {fmt_reais(pop_d.median())}. A passagem típica custa bem mais que a despesa "
+                "típica, porém a cauda de valores altos das demais categorias (divulgação, fretamentos, "
+                "escritório) puxa a média delas para cima e anula a diferença nas médias."
+            )
 
 # ===========================================================================
 # Variabilidade amostral
@@ -409,8 +456,8 @@ with st.container(horizontal=True):
               help=f"Pela teoria, cerca de {confianca} dos intervalos devem conter o parâmetro.")
     st.metric(
         "Amostras que rejeitam H0", fmt_pct(taxa_rejeicao), border=True,
-        help=("Como H0 é falsa na população, esta taxa estima o poder do teste."
-              if not verdadeira else "Como H0 é verdadeira na população, esta taxa estima o erro tipo I."),
+        help=("Como H1 é verdadeira na população, esta taxa estima o poder do teste."
+              if not verdadeira else "Como H1 é falsa na população, esta taxa estima a frequência de erro tipo I."),
     )
     st.metric("Desvio-padrão das estimativas", fmt_variavel(sim["Estimativa"].std(), prop, 2), border=True,
               help="Erro-padrão observado empiricamente nas 1.000 amostras.")
@@ -426,13 +473,19 @@ with col_ics:
     st.altair_chart(grafico_simulacao_intervalos(sim, hip, parametro), alt="Intervalos de confiança das primeiras amostras simuladas")
 
 if verdadeira:
+    # Quando o parâmetro está do lado oposto ao de H1, rejeitar fica mais raro que α
+    comparacao_alfa = (
+        f"abaixo de α = {fmt_pct(alfa, 0)}, porque o parâmetro real fica do lado oposto ao que H1 afirma"
+        if taxa_rejeicao < alfa - 0.015
+        else f"perto de α = {fmt_pct(alfa, 0)}"
+    )
     leitura_poder = (
-        f"Como H0 é verdadeira na população, rejeitá-la é um erro tipo I. Isso ocorreu em "
-        f"{fmt_pct(taxa_rejeicao)} das amostras, perto de α = {fmt_pct(alfa, 0)}."
+        f"Como H1 é falsa na população, rejeitar H0 é um erro tipo I. Isso ocorreu em "
+        f"{fmt_pct(taxa_rejeicao)} das amostras, {comparacao_alfa}."
     )
 else:
     leitura_poder = (
-        f"Como H0 é falsa na população, o ideal é rejeitá-la. Isso ocorreu em {fmt_pct(taxa_rejeicao)} "
+        f"Como H1 é verdadeira na população, o ideal é rejeitar H0. Isso ocorreu em {fmt_pct(taxa_rejeicao)} "
         f"das amostras (poder estimado do teste); nas demais {fmt_pct(1 - taxa_rejeicao)} a conclusão "
         "seria um erro tipo II."
     )
@@ -469,9 +522,12 @@ st.markdown(
   de milhares de reais). Com n = {fmt_num(len(amostra))} a média amostral é aproximadamente normal, mas um
   único valor extremo sorteado desloca bastante a estimativa e alarga o IC. A mediana seria um resumo mais
   estável, mas o trabalho pede inferência sobre a média.
-- **Subgrupo com n pequeno (M2).** Só {fmt_num(resultados['M2']['n'])} passagens aéreas entraram na amostra,
-  porque a amostra foi dimensionada para a população toda. O IC de M2 é mais largo, e o tamanho do subgrupo
-  também varia de uma amostra para outra.
+- **Grupos desbalanceados (M2).** Só {fmt_num(resultados['M2']['n1'])} passagens aéreas entraram na amostra,
+  contra {fmt_num(resultados['M2']['n2'])} demais despesas, porque a amostra foi dimensionada para a população
+  toda e não por categoria. O tamanho de cada grupo também varia de uma amostra para outra. O teste de Welch
+  lida com tamanhos e variâncias diferentes, mas o erro-padrão é dominado pelo grupo mais disperso (as
+  demais despesas). Além disso, a média esconde que a passagem típica (mediana) custa muito mais que a
+  despesa típica: comparar medianas responderia melhor à pergunta "uma passagem custa mais?".
 - **Dimensionamento feito para proporção.** O n = {fmt_num(len(amostra))} garante margem de ±5 p.p. para
   proporções. Para as médias, a margem obtida depende da variabilidade dos valores e ficou maior que um
   dimensionamento específico para média daria.

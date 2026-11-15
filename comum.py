@@ -12,6 +12,7 @@ from scipy import stats
 from estatistica import (
     calcular_p_valor,
     descritivas,
+    inferencia_duas_medias,
     inferencia_media,
     inferencia_proporcao,
 )
@@ -93,7 +94,8 @@ def fmt_num(valor, casas=0):
 
 
 def fmt_reais(valor, casas=2):
-    return f"R$ {fmt_num(valor, casas)}"
+    sinal = "−" if valor < 0 else ""
+    return f"{sinal}R$ {fmt_num(abs(valor), casas)}"
 
 
 def fmt_pct(valor, casas=1):
@@ -452,6 +454,10 @@ def _passagem_aerea(df):
     return df["categoria"] == "Passagem aérea"
 
 
+def _demais_despesas(df):
+    return df["categoria"] != "Passagem aérea"
+
+
 HIPOTESES = [
     {
         "id": "P1",
@@ -462,6 +468,7 @@ HIPOTESES = [
         "evento": "o lançamento é da categoria Combustíveis e lubrificantes",
         "parametro": "p = proporção de lançamentos de combustível",
         "simbolo": "p",
+        "simbolo_texto": "p",
         "valor_h0": 0.30,
         "alternativa": "maior",
         "justificativa": (
@@ -481,6 +488,7 @@ HIPOTESES = [
         "evento": "o lançamento é de um deputado eleito por ES, MG, RJ ou SP",
         "parametro": "p = proporção de lançamentos de deputados do Sudeste",
         "simbolo": "p",
+        "simbolo_texto": "p",
         # 179 das 513 cadeiras da Câmara são do Sudeste (SP 70, MG 53, RJ 46, ES 10)
         "valor_h0": 179 / 513,
         "alternativa": "maior",
@@ -501,6 +509,7 @@ HIPOTESES = [
         "evento": "todos os lançamentos",
         "parametro": "μ = valor líquido médio por lançamento",
         "simbolo": "\\mu",
+        "simbolo_texto": "μ",
         "valor_h0": 1000.0,
         "alternativa": "maior",
         "justificativa": (
@@ -513,22 +522,26 @@ HIPOTESES = [
     },
     {
         "id": "M2",
-        "tipo": "media",
-        "titulo": "Valor médio da passagem aérea",
-        "pergunta": "O valor médio de uma passagem aérea paga pela cota é diferente de R$ 1.000?",
-        "variavel": "Valor líquido das passagens aéreas, em R$ (quantitativa contínua)",
-        "evento": "lançamentos da categoria Passagem aérea (SIGEPA, RPA e reembolso)",
-        "parametro": "μ = valor líquido médio de uma passagem aérea",
-        "simbolo": "\\mu",
-        "valor_h0": 1000.0,
-        "alternativa": "diferente",
+        "tipo": "diferenca_medias",
+        "titulo": "Passagem aérea × demais despesas",
+        "pergunta": "O valor médio de uma passagem aérea é maior que o valor médio dos outros tipos de despesa?",
+        "variavel": "Valor líquido da despesa, em R$ (quantitativa contínua), comparado entre dois grupos",
+        "evento": "grupo P = passagens aéreas (SIGEPA, RPA e reembolso); grupo D = todas as demais categorias",
+        "parametro": "μP − μD = média das passagens aéreas menos a média das demais despesas",
+        "simbolo": "\\mu_P - \\mu_D",
+        "simbolo_texto": "μP − μD",
+        "valor_h0": 0.0,
+        "alternativa": "maior",
+        # Hipótese nula escrita como igualdade, como na formulação do trabalho
+        "sinal_h0": "=",
         "justificativa": (
-            "Passagem aérea é o segundo tipo de lançamento mais frequente e um dos maiores gastos da cota. "
-            "R$ 1.000 é uma referência para um trecho doméstico. Como não há expectativa prévia sobre o "
-            "sentido da diferença, o teste é bilateral. A análise usa só as passagens aéreas da amostra: "
-            "dentro desse subgrupo a amostra continua aleatória, mas o tamanho dela também é aleatório."
+            "Passagem aérea é o segundo tipo de lançamento mais frequente da cota. A pergunta investiga se, "
+            "individualmente, uma passagem custa mais que uma despesa de outro tipo. O teste é unilateral à "
+            "direita. Os dois grupos vêm da mesma AAS e não se sobrepõem, então são amostras independentes; "
+            "como têm tamanhos e variâncias diferentes, usamos o teste t de Welch, que não supõe variâncias iguais."
         ),
         "funcao": _passagem_aerea,
+        "funcao_grupo2": _demais_despesas,
     },
 ]
 HIPOTESES_POR_ID = {h["id"]: h for h in HIPOTESES}
@@ -543,8 +556,9 @@ def latex_hipoteses(hip):
     valor = f"{hip['valor_h0']:.3f}".rstrip("0").replace(".", ",") if hip["tipo"] == "proporcao" else fmt_num(hip["valor_h0"], 0)
     valor = valor.replace(",", "{,}")
     s = hip["simbolo"]
+    sinal_h0 = hip.get("sinal_h0", SINAIS_H0[hip["alternativa"]])
     return (
-        f"H_0: {s} {SINAIS_H0[hip['alternativa']]} {valor} \\qquad "
+        f"H_0: {s} {sinal_h0} {valor} \\qquad "
         f"H_1: {s} {SINAIS_H1[hip['alternativa']]} {valor}"
     )
 
@@ -554,6 +568,11 @@ def analisar(hip, df, alfa):
     selecao = hip["funcao"](df)
     if hip["tipo"] == "proporcao":
         return inferencia_proporcao(int(selecao.sum()), len(df), hip["valor_h0"], hip["alternativa"], alfa, 1 - alfa)
+    if hip["tipo"] == "diferenca_medias":
+        grupo2 = hip["funcao_grupo2"](df)
+        return inferencia_duas_medias(
+            df.loc[selecao, "vlrLiquido"], df.loc[grupo2, "vlrLiquido"], hip["valor_h0"], hip["alternativa"], alfa, 1 - alfa
+        )
     return inferencia_media(df.loc[selecao, "vlrLiquido"], hip["valor_h0"], hip["alternativa"], alfa, 1 - alfa)
 
 
@@ -561,7 +580,10 @@ def parametro_populacional(hip, populacao):
     selecao = hip["funcao"](populacao)
     if hip["tipo"] == "proporcao":
         return selecao.mean()
-    return populacao.loc[selecao, "vlrLiquido"].mean()
+    media = populacao.loc[selecao, "vlrLiquido"].mean()
+    if hip["tipo"] == "diferenca_medias":
+        return media - populacao.loc[hip["funcao_grupo2"](populacao), "vlrLiquido"].mean()
+    return media
 
 
 def h0_verdadeira(hip, parametro):
@@ -593,6 +615,22 @@ def simular_amostras(id_hipotese, alfa, n, repeticoes=1000, semente=7):
         estatistica = (estimativa - p0) / np.sqrt(p0 * (1 - p0) / n)
         p_valor = calcular_p_valor(stats.norm, estatistica, hip["alternativa"])
         tamanho = np.full(repeticoes, n)
+    elif hip["tipo"] == "diferenca_medias":
+        valores = populacao["vlrLiquido"].to_numpy()[indices]
+        grupo2 = hip["funcao_grupo2"](populacao).to_numpy()[indices]
+        n1, n2 = selecao.sum(axis=1), grupo2.sum(axis=1)
+        media1 = (valores * selecao).sum(axis=1) / n1
+        media2 = (valores * grupo2).sum(axis=1) / n2
+        v1 = ((valores - media1[:, None]) ** 2 * selecao).sum(axis=1) / (n1 - 1) / n1
+        v2 = ((valores - media2[:, None]) ** 2 * grupo2).sum(axis=1) / (n2 - 1) / n2
+        erro_padrao = np.sqrt(v1 + v2)
+        dist = stats.t((v1 + v2) ** 2 / (v1**2 / (n1 - 1) + v2**2 / (n2 - 1)))
+        estimativa = media1 - media2
+        margem = dist.ppf(1 - alfa / 2) * erro_padrao
+        estatistica = (estimativa - hip["valor_h0"]) / erro_padrao
+        p_valor = calcular_p_valor(dist, estatistica, hip["alternativa"])
+        # Tamanho do grupo das passagens aéreas, que varia de uma amostra para outra
+        tamanho = n1
     else:
         valores = populacao["vlrLiquido"].to_numpy()[indices]
         tamanho = selecao.sum(axis=1)
