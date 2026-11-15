@@ -1,0 +1,15 @@
+{
+  "registros_originais": 209078,
+  "variaveis_originais": 32,
+  "removidos_sem_partido": 942,
+  "removidos_valor_nao_positivo": 8080,
+  "N": 200056,
+  "confianca": 0.95,
+  "erro": 0.05,
+  "p_planejamento": 0.5,
+  "z": 1.959963984540054,
+  "n0": 384.14588206941244,
+  "n_exato": 383.4115748452367,
+  "n": 384,
+  "semente": 2026
+}

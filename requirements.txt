@@ -1,0 +1,6 @@
+streamlit>=1.67
+pandas>=3.0
+numpy
+scipy
+altair
+pyarrow
