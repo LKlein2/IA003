@@ -68,8 +68,6 @@ variaveis = pd.DataFrame(
         ("txtDescricao → categoria", "Categoria de despesa", "Qualitativa nominal",
          "Tipo de gasto, agrupado em 10 categorias (as três modalidades de passagem aérea viram uma). Usada em P1 e M2."),
         ("sgUF → regiao", "Região do parlamentar", "Qualitativa nominal", "Região da UF pela qual o deputado foi eleito. Usada em P2."),
-        ("sgPartido", "Partido", "Qualitativa nominal", "Sigla do partido do deputado (10 maiores + outros)."),
-        ("numMes", "Mês", "Qualitativa ordinal", "Mês de competência da despesa."),
     ],
     columns=["Coluna original", "Variável", "Tipo", "Descrição"],
 )
