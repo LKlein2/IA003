@@ -27,7 +27,6 @@ from comum import (
     h0_verdadeira,
     latex_hipoteses,
     parametro_populacional,
-    simular_amostras,
 )
 from estatistica import ic_bootstrap_media
 
@@ -91,8 +90,8 @@ def tipo_de_decisao(hip, res, parametro):
     distancia = f"{fmt_num(distancia * 100, 2)} p.p." if prop else fmt_reais(distancia)
     return (
         "Erro tipo II: não rejeitou uma H₀ que é falsa na população. A diferença real entre o parâmetro "
-        f"({fmt_variavel(parametro, prop)}) e o valor de H₀ ({fmt_h0(hip)}) é de só {distancia}, "
-        f"pequena demais para ser detectada com n = {fmt_num(res['n'])}."
+        f"({fmt_variavel(parametro, prop)}) e o valor de H₀ ({fmt_h0(hip)}) é de {distancia}, e a amostra "
+        f"(n = {fmt_num(res['n'])}) não teve precisão suficiente para detectá-la."
     )
 
 
@@ -173,60 +172,6 @@ def grafico_estatistica(res):
         x="x:Q", tooltip=["Rótulo:N"]
     )
     return (area + rejeicao + linha + regra_crit + regra_obs + texto_obs).properties(height=260)
-
-
-def grafico_simulacao_estimativas(sim, hip, parametro):
-    prop = eh_proporcao(hip)
-    contagem, limites = np.histogram(sim["Estimativa"], bins=30)
-    dados = pd.DataFrame({"inicio": limites[:-1], "fim": limites[1:], "Amostras": contagem})
-    dados["Intervalo"] = [f"{fmt_variavel(a, prop)} a {fmt_variavel(b, prop)}" for a, b in zip(limites[:-1], limites[1:])]
-    eixo = alt.Axis(labelExpr=EIXO_PCT if prop else EIXO_REAIS)
-    barras = alt.Chart(dados).mark_rect(color=CORES_CONJUNTO[AMOSTRA], opacity=0.85, stroke="white", strokeWidth=1).encode(
-        x=alt.X("inicio:Q", title="Estimativa em cada amostra", axis=eixo, scale=alt.Scale(zero=False)),
-        x2="fim:Q",
-        y=alt.Y("Amostras:Q", title="Número de amostras"),
-        y2=alt.datum(0),
-        tooltip=["Intervalo:N", "Amostras:Q"],
-    )
-    referencias = pd.DataFrame({
-        "x": [parametro, hip["valor_h0"], resultados[hip["id"]]["estimativa"]],
-        "Referência": ["Parâmetro da população", "Valor de H0", "Nossa amostra"],
-    })
-    referencias["Valor"] = referencias["x"].map(lambda v: fmt_variavel(v, prop))
-    cores = alt.Color(
-        "Referência:N",
-        scale=alt.Scale(domain=list(referencias["Referência"]), range=[CORES_CONJUNTO[POPULACAO], COR_H0, "#52514e"]),
-        legend=alt.Legend(orient="top", title=None),
-    )
-    tracos = alt.StrokeDash(
-        "Referência:N",
-        scale=alt.Scale(domain=list(referencias["Referência"]), range=[[1, 0], [5, 4], [2, 2]]),
-        legend=None,
-    )
-    regras = alt.Chart(referencias).mark_rule(strokeWidth=2.5).encode(x="x:Q", color=cores, strokeDash=tracos, tooltip=["Referência:N", "Valor:N"])
-    return (barras + regras).properties(height=280)
-
-
-def grafico_simulacao_intervalos(sim, hip, parametro, quantidade=60):
-    prop = eh_proporcao(hip)
-    dados = sim.head(quantidade).copy()
-    dados["Resultado"] = np.where(dados["Contém o parâmetro"], "Contém o parâmetro", "Não contém o parâmetro")
-    dados["IC"] = [f"[{fmt_variavel(a, prop)}; {fmt_variavel(b, prop)}]" for a, b in zip(dados["IC inferior"], dados["IC superior"])]
-    eixo = alt.Axis(labelExpr=EIXO_PCT if prop else EIXO_REAIS)
-    cor = alt.Color(
-        "Resultado:N",
-        scale=alt.Scale(domain=["Contém o parâmetro", "Não contém o parâmetro"], range=[COR_ACEITACAO, COR_REJEICAO]),
-        legend=alt.Legend(orient="top", title=None),
-    )
-    intervalos = alt.Chart(dados).mark_rule(strokeWidth=2).encode(
-        y=alt.Y("Amostra:O", title=f"{quantidade} primeiras amostras", axis=alt.Axis(labels=False, ticks=False)),
-        x=alt.X("IC inferior:Q", title=f"IC de {confianca} em cada amostra", axis=eixo, scale=alt.Scale(zero=False)),
-        x2="IC superior:Q",
-        color=cor,
-        tooltip=["Amostra:O", "IC:N", "n:Q"],
-    )
-    linha = alt.Chart(pd.DataFrame({"x": [parametro]})).mark_rule(color=CORES_CONJUNTO[POPULACAO], strokeWidth=2).encode(x="x:Q")
-    return (intervalos + linha).properties(height=280)
 
 
 # ===========================================================================
@@ -393,99 +338,76 @@ with col_conc:
         )
 
 # ===========================================================================
-# Variabilidade amostral
+# Conclusão
 # ===========================================================================
 
-st.subheader("Efeito da variabilidade amostral", divider="gray")
-st.markdown(
-    f"Outra amostra aleatória daria outra estimativa, outro intervalo e talvez outra conclusão. Para medir "
-    f"isso, sorteamos **1.000 novas AAS** de tamanho {fmt_num(len(amostra))} da população e repetimos a "
-    f"análise de **{hip['id']}** em cada uma."
+st.subheader("Conclusão", divider="gray")
+
+
+def frase_decisao(hip):
+    res = resultados[hip["id"]]
+    if res["rejeita_h0"]:
+        return f"**{hip['id']}**: rejeitamos H0. Há evidência de que {hip['h1_texto']}."
+    return f"**{hip['id']}**: não rejeitamos H0. Não há evidência de que {hip['h1_texto']}."
+
+
+def frase_diferenca(hip):
+    prop = eh_proporcao(hip)
+    diferenca = resultados[hip["id"]]["estimativa"] - parametros[hip["id"]]
+    if prop:
+        return f"{'+' if diferenca > 0 else '−'}{fmt_num(abs(diferenca) * 100, 1)} p.p. em {hip['id']}"
+    return f"{'+' if diferenca > 0 else '−'}{fmt_reais(abs(diferenca), 0)} em {hip['id']}"
+
+
+def frase_margem(hip):
+    margem = resultados[hip["id"]]["margem"]
+    if eh_proporcao(hip):
+        return f"±{fmt_num(margem * 100, 1)} p.p. em {hip['id']}"
+    return f"±{fmt_reais(margem, 0)} em {hip['id']}"
+
+
+contem_todos = all(contem(resultados[h["id"]]["ic"], parametros[h["id"]]) for h in HIPOTESES)
+erros = [h for h in HIPOTESES if tipo_de_decisao(h, resultados[h["id"]], parametros[h["id"]]).startswith("Erro")]
+# Conclusões com p-valor perto de α são as que mais mudariam com outra amostra
+sensiveis = [h["id"] for h in HIPOTESES if alfa / 5 <= resultados[h["id"]]["p_valor"] <= 2 * alfa]
+
+texto_ic = (
+    "Nos quatro casos o parâmetro da população ficou **dentro** do intervalo de confiança."
+    if contem_todos
+    else "Em algum caso o parâmetro da população ficou **fora** do intervalo de confiança, o que acontece "
+    f"em cerca de {fmt_pct(alfa, 0)} das amostras."
 )
-sim = simular_amostras(hip["id"], alfa, len(amostra))
-cobertura = sim["Contém o parâmetro"].mean()
-taxa_rejeicao = sim["Rejeita H0"].mean()
-verdadeira = h0_verdadeira(hip, parametro)
-
-with st.container(horizontal=True):
-    st.metric(f"ICs que contêm o parâmetro", fmt_pct(cobertura), border=True,
-              help=f"Pela teoria, cerca de {confianca} dos intervalos devem conter o parâmetro.")
-    st.metric(
-        "Amostras que rejeitam H0", fmt_pct(taxa_rejeicao), border=True,
-        help=("Como H1 é verdadeira na população, esta taxa estima o poder do teste."
-              if not verdadeira else "Como H1 é falsa na população, esta taxa estima a frequência de erro tipo I."),
-    )
-    st.metric("Desvio-padrão das estimativas", fmt_variavel(sim["Estimativa"].std(), prop, 2), border=True,
-              help="Erro-padrão observado empiricamente nas 1.000 amostras.")
-    st.metric("Erro-padrão da nossa amostra", fmt_variavel(res["erro_padrao"], prop, 2), border=True,
-              help="Erro-padrão estimado só com a amostra sorteada.")
-
-col_dist, col_ics = st.columns(2)
-with col_dist:
-    st.markdown("**Distribuição amostral da estimativa**")
-    st.altair_chart(grafico_simulacao_estimativas(sim, hip, parametro), alt="Histograma das estimativas nas 1.000 amostras")
-with col_ics:
-    st.markdown("**Intervalos de confiança de amostras diferentes**")
-    st.altair_chart(grafico_simulacao_intervalos(sim, hip, parametro), alt="Intervalos de confiança das primeiras amostras simuladas")
-
-if verdadeira:
-    # Quando o parâmetro está do lado oposto ao de H1, rejeitar fica mais raro que α
-    comparacao_alfa = (
-        f"abaixo de α = {fmt_pct(alfa, 0)}, porque o parâmetro real fica do lado oposto ao que H1 afirma"
-        if taxa_rejeicao < alfa - 0.015
-        else f"perto de α = {fmt_pct(alfa, 0)}"
-    )
-    leitura_poder = (
-        f"Como H1 é falsa na população, rejeitar H0 é um erro tipo I. Isso ocorreu em "
-        f"{fmt_pct(taxa_rejeicao)} das amostras, {comparacao_alfa}."
+if erros:
+    texto_erros = " ".join(
+        f"Em {h['id']} houve {tipo_de_decisao(h, resultados[h['id']], parametros[h['id']])[0].lower()}"
+        f"{tipo_de_decisao(h, resultados[h['id']], parametros[h['id']])[1:]}"
+        for h in erros
     )
 else:
-    leitura_poder = (
-        f"Como H1 é verdadeira na população, o ideal é rejeitar H0. Isso ocorreu em {fmt_pct(taxa_rejeicao)} "
-        f"das amostras (poder estimado do teste); nas demais {fmt_pct(1 - taxa_rejeicao)} a conclusão "
-        "seria um erro tipo II."
-    )
-if cobertura >= 1 - alfa - 0.015:
-    leitura_cobertura = f"{fmt_pct(cobertura)} dos ICs de {confianca} contêm o parâmetro, perto do nível nominal."
-elif prop:
-    leitura_cobertura = (
-        f"Só {fmt_pct(cobertura)} dos ICs de {confianca} contêm o parâmetro, abaixo do nível nominal. "
-        "Com proporções pequenas, o IC de Wald fica curto demais em parte das amostras; um IC de Wilson "
-        "corrigiria isso."
-    )
-else:
-    leitura_cobertura = (
-        f"Só {fmt_pct(cobertura)} dos ICs de {confianca} contêm o parâmetro, abaixo do nível nominal. "
-        "A cauda longa dos valores faz a média amostral demorar a ficar normal: amostras sem valores extremos "
-        "subestimam a média e o desvio-padrão ao mesmo tempo, e o IC t fica curto demais."
-    )
-st.markdown(
-    f"**Leitura:** as estimativas se concentram em torno do parâmetro populacional, o que mostra que o "
-    f"estimador é não viesado. {leitura_cobertura} {leitura_poder}"
+    texto_erros = "Todas as decisões dos testes coincidem com o que é verdade na população."
+texto_sensiveis = (
+    f" As conclusões com p-valor mais perto de α ({', '.join(sensiveis)}) são as que mais poderiam mudar com outra amostra."
+    if sensiveis
+    else ""
 )
 
-# ===========================================================================
-# Limitações
-# ===========================================================================
+with st.container(border=True):
+    st.markdown(
+        f"""
+**Resultados dos testes** (α = {fmt_pct(alfa, 0)})
 
-st.subheader("Limitações da análise", divider="gray")
-st.markdown(
-    f"""
-- **Uma única amostra.** As conclusões valem para a amostra sorteada com a semente escolhida. A simulação
-  acima mostra que outra amostra pode levar a outra conclusão, sobretudo quando o parâmetro está perto do
-  valor de H0.
-- **Variáveis de valor muito assimétricas.** O valor líquido tem cauda longa (poucos lançamentos de dezenas
-  de milhares de reais). Com n = {fmt_num(len(amostra))} a média amostral é aproximadamente normal, mas um
-  único valor extremo sorteado desloca bastante a estimativa e alarga o IC. A mediana seria um resumo mais
-  estável, mas o trabalho pede inferência sobre a média.
-- **Subgrupo com n pequeno (M2).** Só {fmt_num(resultados['M2']['n'])} passagens aéreas entraram na amostra,
-  porque a amostra foi dimensionada para a população toda. O IC de M2 é mais largo, e o tamanho do subgrupo
-  também varia de uma amostra para outra.
-- **Dimensionamento feito para proporção.** O n = {fmt_num(len(amostra))} garante margem de ±5 p.p. para
-  proporções. Para as médias, a margem obtida depende da variabilidade dos valores e ficou maior que um
-  dimensionamento específico para média daria.
-- **Unidade amostral é o lançamento, não o deputado.** Deputados com muitos lançamentos pesam mais nas
-  estimativas. Perguntas sobre o comportamento médio por deputado exigiriam outra unidade amostral.
-- **Recorte da base.** Lideranças e estornos ficaram fora da população; os resultados não se aplicam a eles.
+{chr(10).join(f"- {frase_decisao(h)}" for h in HIPOTESES)}
+
+**Comparação com a população.** As estimativas ficaram próximas dos parâmetros: diferença de
+{", ".join(frase_diferenca(h) for h in HIPOTESES)}. {texto_ic} {texto_erros}
+
+**Efeito da variabilidade amostral.** A estimativa não coincide com o parâmetro porque cada amostra aleatória
+é diferente. O intervalo de confiança mede essa incerteza: a margem de erro foi de
+{", ".join(frase_margem(h) for h in HIPOTESES)}.{texto_sensiveis}
+
+**Limitações.** Os valores das despesas são muito assimétricos: poucas despesas muito altas puxam a média
+para cima e alargam os intervalos. Só {fmt_num(resultados['M2']['n'])} passagens aéreas entraram na amostra:
+com tão poucos dados, o resultado de M2 depende muito de quais passagens foram sorteadas. E a unidade amostral é o lançamento, não o deputado: quem lança
+mais despesas pesa mais nos resultados.
 """
-)
+    )

@@ -7,10 +7,8 @@ import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
-from scipy import stats
 
 from estatistica import (
-    calcular_p_valor,
     descritivas,
     inferencia_media,
     inferencia_proporcao,
@@ -459,6 +457,7 @@ HIPOTESES = [
         "tipo": "proporcao",
         "titulo": "Proporção de lançamentos de combustível",
         "pergunta": "Mais de 30% dos lançamentos da cota são gastos com combustível?",
+        "h1_texto": "combustível passa de 30% dos lançamentos",
         "variavel": "Categoria de despesa (qualitativa nominal)",
         "evento": "o lançamento é da categoria Combustíveis e lubrificantes",
         "parametro": "p = proporção de lançamentos de combustível",
@@ -479,6 +478,7 @@ HIPOTESES = [
         "tipo": "proporcao",
         "titulo": "Proporção de lançamentos do Sudeste",
         "pergunta": "Os deputados do Sudeste concentram mais lançamentos que o peso da sua bancada na Câmara?",
+        "h1_texto": "o Sudeste lança mais despesas que o peso da sua bancada (34,9%)",
         "variavel": "Região do parlamentar (qualitativa nominal)",
         "evento": "o lançamento é de um deputado eleito por ES, MG, RJ ou SP",
         "parametro": "p = proporção de lançamentos de deputados do Sudeste",
@@ -500,6 +500,7 @@ HIPOTESES = [
         "tipo": "media",
         "titulo": "Valor médio por lançamento",
         "pergunta": "O valor médio de um lançamento da cota passa de R$ 1.000?",
+        "h1_texto": "o valor médio por lançamento passa de R$ 1.000",
         "variavel": "Valor líquido da despesa, em R$ (quantitativa contínua)",
         "evento": "todos os lançamentos",
         "parametro": "μ = valor líquido médio por lançamento",
@@ -520,6 +521,7 @@ HIPOTESES = [
         "tipo": "media",
         "titulo": "Valor médio da passagem aérea",
         "pergunta": "O valor médio de uma passagem aérea paga pela cota passa de R$ 1.000?",
+        "h1_texto": "o valor médio de uma passagem aérea passa de R$ 1.000",
         "variavel": "Valor líquido das passagens aéreas, em R$ (quantitativa contínua)",
         "evento": "lançamentos da categoria Passagem aérea (SIGEPA, RPA e reembolso)",
         "parametro": "μ = valor líquido médio de uma passagem aérea",
@@ -580,48 +582,3 @@ def h0_verdadeira(hip, parametro):
         return parametro >= hip["valor_h0"]
     return np.isclose(parametro, hip["valor_h0"])
 
-
-# ===========================================================================
-# Simulação de muitas AAS (variabilidade amostral)
-# ===========================================================================
-
-@st.cache_data(show_spinner="Sorteando 1.000 amostras da população...")
-def simular_amostras(id_hipotese, alfa, n, repeticoes=1000, semente=7):
-    """Repete a AAS de tamanho n e devolve estimativa, IC e decisão de cada repetição."""
-    hip = HIPOTESES_POR_ID[id_hipotese]
-    populacao = carregar_populacao()
-    rng = np.random.default_rng(semente)
-    indices = np.stack([rng.choice(len(populacao), size=n, replace=False) for _ in range(repeticoes)])
-    selecao = hip["funcao"](populacao).to_numpy()[indices]
-
-    if hip["tipo"] == "proporcao":
-        estimativa = selecao.mean(axis=1)
-        z_crit = stats.norm.ppf(1 - alfa / 2)
-        margem = z_crit * np.sqrt(estimativa * (1 - estimativa) / n)
-        p0 = hip["valor_h0"]
-        estatistica = (estimativa - p0) / np.sqrt(p0 * (1 - p0) / n)
-        p_valor = calcular_p_valor(stats.norm, estatistica, hip["alternativa"])
-        tamanho = np.full(repeticoes, n)
-    else:
-        valores = populacao["vlrLiquido"].to_numpy()[indices]
-        tamanho = selecao.sum(axis=1)
-        estimativa = (valores * selecao).sum(axis=1) / tamanho
-        desvios = ((valores - estimativa[:, None]) ** 2 * selecao).sum(axis=1)
-        erro_padrao = np.sqrt(desvios / (tamanho - 1)) / np.sqrt(tamanho)
-        dist = stats.t(tamanho - 1)
-        margem = dist.ppf(1 - alfa / 2) * erro_padrao
-        estatistica = (estimativa - hip["valor_h0"]) / erro_padrao
-        p_valor = calcular_p_valor(dist, estatistica, hip["alternativa"])
-
-    parametro = parametro_populacional(hip, populacao)
-    resultado = pd.DataFrame({
-        "Amostra": np.arange(1, repeticoes + 1),
-        "n": tamanho,
-        "Estimativa": estimativa,
-        "IC inferior": estimativa - margem,
-        "IC superior": estimativa + margem,
-        "p-valor": p_valor,
-    })
-    resultado["Rejeita H0"] = resultado["p-valor"] < alfa
-    resultado["Contém o parâmetro"] = (resultado["IC inferior"] <= parametro) & (parametro <= resultado["IC superior"])
-    return resultado
